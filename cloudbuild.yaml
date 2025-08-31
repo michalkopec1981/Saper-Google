@@ -1,0 +1,51 @@
+steps:
+  # 1. Zbuduj obraz kontenera
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'europe-west3-docker.pkg.dev/$PROJECT_ID/saper-repo/saper-app:$COMMIT_SHA'
+      - '.'
+
+  # 2. Wypchnij obraz do Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'europe-west3-docker.pkg.dev/$PROJECT_ID/saper-repo/saper-app:$COMMIT_SHA'
+
+  # 3. Uruchom inicjalizację/migrację bazy danych (odpowiednik "release" z Procfile)
+  # Ten krok używa zbudowanego obrazu do uruchomienia jednorazowej komendy.
+  - name: 'europe-west3-docker.pkg.dev/$PROJECT_ID/saper-repo/saper-app:$COMMIT_SHA'
+    entrypoint: 'flask'
+    args: ['init-db']
+    secretEnv: ['DATABASE_URL']
+
+  # 4. Wdróż aplikację na Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'saper-app' # Nazwa Twojej usługi w Cloud Run
+      - '--image'
+      - 'europe-west3-docker.pkg.dev/$PROJECT_ID/saper-repo/saper-app:$COMMIT_SHA'
+      - '--region'
+      - 'europe-west3'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      # Włącz sesje sticky, ważne dla Socket.IO
+      - '--session-affinity'
+      # Ustaw zmienną środowiskową z adresem bazy danych
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest'
+    secretEnv: ['DATABASE_URL']
+
+# Definicja sekretu, którego będziemy używać w krokach powyżej
+availableSecrets:
+  secretManager:
+  - versionName: projects/$PROJECT_ID/secrets/DATABASE_URL/versions/latest
+    env: 'DATABASE_URL'
+
+# Przechowuj obrazy w Artifact Registry
+images:
+  - 'europe-west3-docker.pkg.dev/$PROJECT_ID/saper-repo/saper-app:$COMMIT_SHA'
